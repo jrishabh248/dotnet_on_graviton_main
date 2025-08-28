@@ -24,7 +24,7 @@ Parameters:
   EKSKubernetesVersion:
     Type: String
     Description: EKS Kubernetes Version
-    Default: '1.27'
+    Default: '1.32'
   EKSClusterName:
     Type: String
     Description: EKS Cluster name
@@ -38,6 +38,7 @@ Resources:
       TimeoutInMinutes: '5'
       Parameters:
         EnvironmentName: !Ref EnvironmentName
+        EKSClusterName: !Ref EKSClusterName
   
   IamStack:
     Type: 'AWS::CloudFormation::Stack'

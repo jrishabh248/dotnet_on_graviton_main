@@ -14,7 +14,7 @@ Parameters:
   EKSKubernetesVersion:
     Type: String
     Description: EKS Kubernetes Version
-    Default: '1.25'
+    Default: '1.32'
   EKSClusterName:
     Type: String
     Description: EKS Cluster name
@@ -32,57 +32,323 @@ Resources:
         SecurityGroupIds: !Ref ControlPlaneSecurityGroup
         SubnetIds: !Ref SubnetsList
       RoleArn: !Ref EKSServiceRoleArn
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIG_MAP
+        BootstrapClusterCreatorAdminPermissions: true
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}/ControlPlane'
       Version: !Ref EKSKubernetesVersion
 
-  KarpenterControllerPolicy:
-    Type: AWS::IAM::ManagedPolicy
+  # Pod Identity Roles
+  AWSLoadBalancerControllerRole:
+    Type: AWS::IAM::Role
     Properties:
-      ManagedPolicyName: !Sub "KarpenterControllerPolicy-${AWS::Region}-${ControlPlane}"
-      PolicyDocument:
-        Version: "2012-10-17"
+      RoleName: !Sub "${ControlPlane}-aws-load-balancer-controller"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
         Statement:
           - Effect: Allow
-            Resource: "*"
-            Action:
-              # Write Operations
-              - ec2:CreateFleet
-              - ec2:CreateLaunchTemplate
-              - ec2:CreateTags
-              - ec2:DeleteLaunchTemplate
-              - ec2:RunInstances
-              - ec2:TerminateInstances
-              # Read Operations
-              - ec2:DescribeAvailabilityZones
-              - ec2:DescribeImages
-              - ec2:DescribeInstances
-              - ec2:DescribeInstanceTypeOfferings
-              - ec2:DescribeInstanceTypes
-              - ec2:DescribeLaunchTemplates
-              - ec2:DescribeSecurityGroups
-              - ec2:DescribeSpotPriceHistory
-              - ec2:DescribeSubnets
-              - pricing:GetProducts
-              - ssm:GetParameter
+            Principal:
+              Service: pods.eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ElasticLoadBalancingFullAccess
+      Policies:
+        - PolicyName: AWSLoadBalancerControllerIAMPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:CreateServiceLinkedRole
+                  - ec2:DescribeAccountAttributes
+                  - ec2:DescribeAddresses
+                  - ec2:DescribeAvailabilityZones
+                  - ec2:DescribeInternetGateways
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeVpcPeeringConnections
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeInstances
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeTags
+                  - ec2:GetCoipPoolUsage
+                  - ec2:GetManagedPrefixListEntries
+                  - ec2:DescribeCoipPools
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeLoadBalancerAttributes
+                  - elasticloadbalancing:DescribeListeners
+                  - elasticloadbalancing:DescribeListenerCertificates
+                  - elasticloadbalancing:DescribeSSLPolicies
+                  - elasticloadbalancing:DescribeRules
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTargetGroupAttributes
+                  - elasticloadbalancing:DescribeTargetHealth
+                  - elasticloadbalancing:DescribeTags
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - cognito-idp:DescribeUserPoolClient
+                  - acm:ListCertificates
+                  - acm:DescribeCertificate
+                  - iam:ListServerCertificates
+                  - iam:GetServerCertificate
+                  - waf-regional:GetWebACL
+                  - waf-regional:GetWebACLForResource
+                  - waf-regional:AssociateWebACL
+                  - waf-regional:DisassociateWebACL
+                  - wafv2:GetWebACL
+                  - wafv2:GetWebACLForResource
+                  - wafv2:AssociateWebACL
+                  - wafv2:DisassociateWebACL
+                  - shield:DescribeProtection
+                  - shield:CreateProtection
+                  - shield:DeleteProtection
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupIngress
+                  - ec2:CreateSecurityGroup
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                Resource: arn:aws:ec2:*:*:security-group/*
+                Condition:
+                  StringEquals:
+                    "ec2:CreateAction": "CreateSecurityGroup"
+                  "Null":
+                    "aws:RequestTag/elbv2.k8s.aws/cluster": "false"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:CreateLoadBalancer
+                  - elasticloadbalancing:CreateTargetGroup
+                Resource: "*"
+                Condition:
+                  "Null":
+                    "aws:RequestTag/elbv2.k8s.aws/cluster": "false"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:CreateListener
+                  - elasticloadbalancing:DeleteListener
+                  - elasticloadbalancing:CreateRule
+                  - elasticloadbalancing:DeleteRule
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:AddTags
+                  - elasticloadbalancing:RemoveTags
+                Resource:
+                  - arn:aws:elasticloadbalancing:*:*:targetgroup/*/*
+                  - arn:aws:elasticloadbalancing:*:*:loadbalancer/net/*/*
+                  - arn:aws:elasticloadbalancing:*:*:loadbalancer/app/*/*
+                Condition:
+                  "Null":
+                    "aws:RequestTag/elbv2.k8s.aws/cluster": "true"
+                    "aws:ResourceTag/elbv2.k8s.aws/cluster": "false"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:AddTags
+                  - elasticloadbalancing:RemoveTags
+                Resource:
+                  - arn:aws:elasticloadbalancing:*:*:listener/net/*/*/*
+                  - arn:aws:elasticloadbalancing:*:*:listener/app/*/*/*
+                  - arn:aws:elasticloadbalancing:*:*:listener-rule/net/*/*/*
+                  - arn:aws:elasticloadbalancing:*:*:listener-rule/app/*/*/*
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:ModifyLoadBalancerAttributes
+                  - elasticloadbalancing:SetIpAddressType
+                  - elasticloadbalancing:SetSecurityGroups
+                  - elasticloadbalancing:SetSubnets
+                  - elasticloadbalancing:DeleteLoadBalancer
+                  - elasticloadbalancing:ModifyTargetGroup
+                  - elasticloadbalancing:ModifyTargetGroupAttributes
+                  - elasticloadbalancing:DeleteTargetGroup
+                Resource: "*"
+                Condition:
+                  "Null":
+                    "aws:ResourceTag/elbv2.k8s.aws/cluster": "false"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                Resource: arn:aws:elasticloadbalancing:*:*:targetgroup/*/*
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:SetWebAcl
+                  - elasticloadbalancing:ModifyListener
+                  - elasticloadbalancing:AddListenerCertificates
+                  - elasticloadbalancing:RemoveListenerCertificates
+                  - elasticloadbalancing:ModifyRule
+                Resource: "*"
+
+  EBSCSIDriverRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ControlPlane}-ebs-csi-driver"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
           - Effect: Allow
-            Action:
-              # Write Operations
-              - sqs:DeleteMessage
-              # Read Operations
-              - sqs:GetQueueAttributes
-              - sqs:GetQueueUrl
-              - sqs:ReceiveMessage
-            Resource: "*"
+            Principal:
+              Service: pods.eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy
+
+  KarpenterControllerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ControlPlane}-karpenter"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
           - Effect: Allow
-            Action:
-              - iam:PassRole
-            Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/KarpenterNodeRole-${ControlPlane}"
+            Principal:
+              Service: pods.eks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: KarpenterControllerPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Resource: "*"
+                Action:
+                  - ec2:CreateFleet
+                  - ec2:CreateLaunchTemplate
+                  - ec2:CreateTags
+                  - ec2:DeleteLaunchTemplate
+                  - ec2:RunInstances
+                  - ec2:TerminateInstances
+                  - ec2:DescribeAvailabilityZones
+                  - ec2:DescribeImages
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceTypeOfferings
+                  - ec2:DescribeInstanceTypes
+                  - ec2:DescribeLaunchTemplates
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSpotPriceHistory
+                  - ec2:DescribeSubnets
+                  - pricing:GetProducts
+                  - ssm:GetParameter
+              - Effect: Allow
+                Action:
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:GetQueueUrl
+                  - sqs:ReceiveMessage
+                Resource: !Sub "arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${ControlPlane}-karpenter"
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/KarpenterNodeRole-*"
+              - Effect: Allow
+                Action:
+                  - eks:DescribeCluster
+                Resource: !Sub "arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ControlPlane}"
+
+  # Pod Identity Associations
+  AWSLoadBalancerControllerPodIdentity:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref ControlPlane
+      Namespace: kube-system
+      ServiceAccount: aws-load-balancer-controller
+      RoleArn: !GetAtt AWSLoadBalancerControllerRole.Arn
+
+  EBSCSIDriverPodIdentity:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref ControlPlane
+      Namespace: kube-system
+      ServiceAccount: ebs-csi-controller-sa
+      RoleArn: !GetAtt EBSCSIDriverRole.Arn
+
+  KarpenterPodIdentity:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref ControlPlane
+      Namespace: karpenter
+      ServiceAccount: karpenter
+      RoleArn: !GetAtt KarpenterControllerRole.Arn
+
+  # Karpenter Installation
+  KarpenterAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: KarpenterPodIdentity
+    Properties:
+      ClusterName: !Ref ControlPlane
+      AddonName: eks-pod-identity-agent
+      ResolveConflicts: OVERWRITE
+
+  KarpenterInterruptionQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ControlPlane}-karpenter"
+      MessageRetentionPeriod: 300
+      SqsManagedSseEnabled: true
+
+  KarpenterInterruptionQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref KarpenterInterruptionQueue
+      PolicyDocument:
+        Statement:
           - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+                - sqs.amazonaws.com
             Action:
-              - eks:DescribeCluster
-            Resource: !Sub "arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ControlPlane}"
+              - sqs:SendMessage
+            Resource: !GetAtt KarpenterInterruptionQueue.Arn
+
+  KarpenterSpotInterruptionRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ControlPlane}-karpenter-spot-interruption"
+      EventPattern:
+        source:
+          - aws.ec2
+        detail-type:
+          - EC2 Spot Instance Interruption Warning
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt KarpenterInterruptionQueue.Arn
+          Id: KarpenterSpotInterruptionQueueTarget
+
+  KarpenterScheduledChangeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ControlPlane}-karpenter-scheduled-change"
+      EventPattern:
+        source:
+          - aws.health
+        detail-type:
+          - AWS Health Event
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt KarpenterInterruptionQueue.Arn
+          Id: KarpenterScheduledChangeQueueTarget
+
+  KarpenterInstanceStateChangeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ControlPlane}-karpenter-instance-state-change"
+      EventPattern:
+        source:
+          - aws.ec2
+        detail-type:
+          - EC2 Instance State-change Notification
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt KarpenterInterruptionQueue.Arn
+          Id: KarpenterInstanceStateChangeQueueTarget
 
 Outputs:
   ARN:
@@ -109,3 +375,19 @@ Outputs:
       - Endpoint
     Export:
       Name: !Sub '${AWS::StackName}::Endpoint'
+  AWSLoadBalancerControllerRoleArn:
+    Value: !GetAtt AWSLoadBalancerControllerRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}::AWSLoadBalancerControllerRoleArn'
+  EBSCSIDriverRoleArn:
+    Value: !GetAtt EBSCSIDriverRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}::EBSCSIDriverRoleArn'
+  KarpenterControllerRoleArn:
+    Value: !GetAtt KarpenterControllerRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}::KarpenterControllerRoleArn'
+  KarpenterInterruptionQueueName:
+    Value: !GetAtt KarpenterInterruptionQueue.QueueName
+    Export:
+      Name: !Sub '${AWS::StackName}::KarpenterInterruptionQueueName'
