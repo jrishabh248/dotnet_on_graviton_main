@@ -143,12 +143,14 @@ pipeline {
                   TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
                   export AWS_REGION=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s 169.254.169.254/latest/meta-data/placement/region)
                   aws eks update-kubeconfig --name $EKS_Cluster
+                  
+                  kubectl apply -f K8s_Yaml/Default_Karpenter_Provisioner.yaml
+                  
                   kubectl get pod --all-namespaces
                   sed -ie "/image:/s_nginx:latest_${DockerImage}_" ./K8s_Yaml/EKSDeployment.yaml
                   yq 'select(documentIndex == 0)' ./K8s_Yaml/EKSDeployment.yaml | kubectl apply -f -
                   yq "select(documentIndex == 1)|.spec.template.spec.containers[0].env += \
                   {\\\"name\\\": \\\"IMAGE_TAG\\\", \\\"value\\\": \\\"$BUILD_ID\\\"}" ./K8s_Yaml/EKSDeployment.yaml | kubectl apply -f - 
-                  # kubectl apply -f ./K8s_Yaml/EKSDeployment.yaml
                   kubectl get svc,pod -o wide
                   '''
                 }

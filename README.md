@@ -118,6 +118,6 @@ The purpose of this repo is to showcase the process of containerizing and deploy
 12. Copy and paste the ELB URL present in "EXTERNAL-IP" field of the "gadgets-online-svc" service in your browser to access the application.
 
 ### To Do:
-1. Install metrics server, setup HPA for the application and install [Karpenter](https://karpenter.sh/v0.27.0/getting-started/getting-started-with-eksctl/) so that it can scale automatically with load.
-14. Instruction to generate load and showcase that the application infra is elastic.
-15. Instruction for cleanup# dotnet_on_graviton_main
+1. Install metrics server, setup HPA for the application.
+17. Instruction to generate load and showcase that the application infra is elastic.
+18. Instruction for cleanup

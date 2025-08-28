@@ -276,118 +276,74 @@ Resources:
       ServiceAccount: karpenter
       RoleArn: !GetAtt KarpenterControllerRole.Arn
 
-  # Karpenter Installation
-  KarpenterAddon:
+  # EKS Addons
+  CoreDNSAddon:
     Type: AWS::EKS::Addon
-    DependsOn: KarpenterPodIdentity
+    Properties:
+      ClusterName: !Ref ControlPlane
+      AddonName: coredns
+      ResolveConflicts: OVERWRITE
+
+  KubeProxyAddon:
+    Type: AWS::EKS::Addon
+    Properties:
+      ClusterName: !Ref ControlPlane
+      AddonName: kube-proxy
+      ResolveConflicts: OVERWRITE
+
+  VPCCNIAddon:
+    Type: AWS::EKS::Addon
+    Properties:
+      ClusterName: !Ref ControlPlane
+      AddonName: vpc-cni
+      ResolveConflicts: OVERWRITE
+
+  EBSCSIAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: EBSCSIDriverPodIdentity
+    Properties:
+      ClusterName: !Ref ControlPlane
+      AddonName: aws-ebs-csi-driver
+      ServiceAccountRoleArn: !GetAtt EBSCSIDriverRole.Arn
+      ResolveConflicts: OVERWRITE
+
+  PodIdentityAddon:
+    Type: AWS::EKS::Addon
     Properties:
       ClusterName: !Ref ControlPlane
       AddonName: eks-pod-identity-agent
       ResolveConflicts: OVERWRITE
 
-  KarpenterInterruptionQueue:
-    Type: AWS::SQS::Queue
+  KarpenterAddon:
+    Type: AWS::EKS::Addon
+    DependsOn: KarpenterPodIdentity
     Properties:
-      QueueName: !Sub "${ControlPlane}-karpenter"
-      MessageRetentionPeriod: 300
-      SqsManagedSseEnabled: true
-
-  KarpenterInterruptionQueuePolicy:
-    Type: AWS::SQS::QueuePolicy
-    Properties:
-      Queues:
-        - !Ref KarpenterInterruptionQueue
-      PolicyDocument:
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - events.amazonaws.com
-                - sqs.amazonaws.com
-            Action:
-              - sqs:SendMessage
-            Resource: !GetAtt KarpenterInterruptionQueue.Arn
-
-  KarpenterSpotInterruptionRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: !Sub "${ControlPlane}-karpenter-spot-interruption"
-      EventPattern:
-        source:
-          - aws.ec2
-        detail-type:
-          - EC2 Spot Instance Interruption Warning
-      State: ENABLED
-      Targets:
-        - Arn: !GetAtt KarpenterInterruptionQueue.Arn
-          Id: KarpenterSpotInterruptionQueueTarget
-
-  KarpenterScheduledChangeRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: !Sub "${ControlPlane}-karpenter-scheduled-change"
-      EventPattern:
-        source:
-          - aws.health
-        detail-type:
-          - AWS Health Event
-      State: ENABLED
-      Targets:
-        - Arn: !GetAtt KarpenterInterruptionQueue.Arn
-          Id: KarpenterScheduledChangeQueueTarget
-
-  KarpenterInstanceStateChangeRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: !Sub "${ControlPlane}-karpenter-instance-state-change"
-      EventPattern:
-        source:
-          - aws.ec2
-        detail-type:
-          - EC2 Instance State-change Notification
-      State: ENABLED
-      Targets:
-        - Arn: !GetAtt KarpenterInterruptionQueue.Arn
-          Id: KarpenterInstanceStateChangeQueueTarget
+      ClusterName: !Ref ControlPlane
+      AddonName: karpenter
+      ServiceAccountRoleArn: !GetAtt KarpenterControllerRole.Arn
+      ResolveConflicts: OVERWRITE
 
 Outputs:
-  ARN:
-    Value: !GetAtt 
-      - ControlPlane
-      - Arn
-    Export:
-      Name: !Sub '${AWS::StackName}::ARN'
-  CertificateAuthorityData:
-    Value: !GetAtt 
-      - ControlPlane
-      - CertificateAuthorityData
-  ClusterSecurityGroupId:
-    Value: !GetAtt 
-      - ControlPlane
-      - ClusterSecurityGroupId
-    Export:
-      Name: !Sub '${AWS::StackName}::ClusterSecurityGroupId'
-  ClusterStackName:
+  ClusterName:
+    Description: EKS Cluster Name
     Value: !Ref ControlPlane
-  Endpoint:
-    Value: !GetAtt 
-      - ControlPlane
-      - Endpoint
     Export:
-      Name: !Sub '${AWS::StackName}::Endpoint'
-  AWSLoadBalancerControllerRoleArn:
-    Value: !GetAtt AWSLoadBalancerControllerRole.Arn
+      Name: !Sub '${AWS::StackName}-ClusterName'
+
+  ClusterEndpoint:
+    Description: EKS Cluster Endpoint
+    Value: !GetAtt ControlPlane.Endpoint
     Export:
-      Name: !Sub '${AWS::StackName}::AWSLoadBalancerControllerRoleArn'
-  EBSCSIDriverRoleArn:
-    Value: !GetAtt EBSCSIDriverRole.Arn
+      Name: !Sub '${AWS::StackName}-ClusterEndpoint'
+
+  ClusterSecurityGroupId:
+    Description: Security Group ID for the EKS cluster
+    Value: !GetAtt ControlPlane.ClusterSecurityGroupId
     Export:
-      Name: !Sub '${AWS::StackName}::EBSCSIDriverRoleArn'
-  KarpenterControllerRoleArn:
-    Value: !GetAtt KarpenterControllerRole.Arn
+      Name: !Sub '${AWS::StackName}-ClusterSecurityGroupId'
+
+  ClusterStackName:
+    Description: EKS Cluster Stack Name
+    Value: !Ref ControlPlane
     Export:
-      Name: !Sub '${AWS::StackName}::KarpenterControllerRoleArn'
-  KarpenterInterruptionQueueName:
-    Value: !GetAtt KarpenterInterruptionQueue.QueueName
-    Export:
-      Name: !Sub '${AWS::StackName}::KarpenterInterruptionQueueName'
+      Name: !Sub '${AWS::StackName}-ClusterStackName'
