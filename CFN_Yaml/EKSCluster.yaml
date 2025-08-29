@@ -50,12 +50,12 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/${ControlPlane.OpenIdConnectIssuerUrl}"
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/oidc.eks.${AWS::Region}.amazonaws.com/id/${ControlPlane.OpenIdConnectIssuerUrl}"
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
               StringEquals:
-                !Sub "${ControlPlane.OpenIdConnectIssuerUrl}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller"
-                !Sub "${ControlPlane.OpenIdConnectIssuerUrl}:aud": "sts.amazonaws.com"
+                !Sub "oidc.eks.${AWS::Region}.amazonaws.com/id/${ControlPlane.OpenIdConnectIssuerUrl}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller"
+                !Sub "oidc.eks.${AWS::Region}.amazonaws.com/id/${ControlPlane.OpenIdConnectIssuerUrl}:aud": "sts.amazonaws.com"
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/ElasticLoadBalancingFullAccess
       Policies:
@@ -198,12 +198,12 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/${ControlPlane.OpenIdConnectIssuerUrl}"
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/oidc.eks.${AWS::Region}.amazonaws.com/id/${ControlPlane.OpenIdConnectIssuerUrl}"
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
               StringEquals:
-                !Sub "${ControlPlane.OpenIdConnectIssuerUrl}:sub": "system:serviceaccount:kube-system:ebs-csi-controller-sa"
-                !Sub "${ControlPlane.OpenIdConnectIssuerUrl}:aud": "sts.amazonaws.com"
+                !Sub "oidc.eks.${AWS::Region}.amazonaws.com/id/${ControlPlane.OpenIdConnectIssuerUrl}:sub": "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+                !Sub "oidc.eks.${AWS::Region}.amazonaws.com/id/${ControlPlane.OpenIdConnectIssuerUrl}:aud": "sts.amazonaws.com"
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy
 
