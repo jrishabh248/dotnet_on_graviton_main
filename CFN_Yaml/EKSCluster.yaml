@@ -50,8 +50,12 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: pods.eks.amazonaws.com
-            Action: sts:AssumeRole
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/${ControlPlane.OpenIdConnectIssuerUrl}"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                !Sub "${ControlPlane.OpenIdConnectIssuerUrl}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller"
+                !Sub "${ControlPlane.OpenIdConnectIssuerUrl}:aud": "sts.amazonaws.com"
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/ElasticLoadBalancingFullAccess
       Policies:
@@ -194,8 +198,12 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: pods.eks.amazonaws.com
-            Action: sts:AssumeRole
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/${ControlPlane.OpenIdConnectIssuerUrl}"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                !Sub "${ControlPlane.OpenIdConnectIssuerUrl}:sub": "system:serviceaccount:kube-system:ebs-csi-controller-sa"
+                !Sub "${ControlPlane.OpenIdConnectIssuerUrl}:aud": "sts.amazonaws.com"
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy
 
@@ -208,8 +216,12 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: pods.eks.amazonaws.com
-            Action: sts:AssumeRole
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/${ControlPlane.OpenIdConnectIssuerUrl}"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                !Sub "${ControlPlane.OpenIdConnectIssuerUrl}:sub": "system:serviceaccount:karpenter:karpenter"
+                !Sub "${ControlPlane.OpenIdConnectIssuerUrl}:aud": "sts.amazonaws.com"
       Policies:
         - PolicyName: KarpenterControllerPolicy
           PolicyDocument:
@@ -252,23 +264,11 @@ Resources:
                 Resource: !Sub "arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ControlPlane}"
 
   # Pod Identity Associations
-  AWSLoadBalancerControllerPodIdentity:
-    Type: AWS::EKS::PodIdentityAssociation
-    Properties:
-      ClusterName: !Ref ControlPlane
-      Namespace: kube-system
-      ServiceAccount: aws-load-balancer-controller
-      RoleArn: !GetAtt AWSLoadBalancerControllerRole.Arn
 
 
 
-  KarpenterPodIdentity:
-    Type: AWS::EKS::PodIdentityAssociation
-    Properties:
-      ClusterName: !Ref ControlPlane
-      Namespace: karpenter
-      ServiceAccount: karpenter
-      RoleArn: !GetAtt KarpenterControllerRole.Arn
+
+
 
   # EKS Addons
   CoreDNSAddon:
@@ -292,20 +292,12 @@ Resources:
       AddonName: vpc-cni
       ResolveConflicts: OVERWRITE
 
-  EBSCSIDriverPodIdentity:
-    Type: AWS::EKS::PodIdentityAssociation
-    Properties:
-      ClusterName: !Ref ControlPlane
-      Namespace: kube-system
-      ServiceAccount: ebs-csi-controller-sa
-      RoleArn: !GetAtt EBSCSIDriverRole.Arn
-
   EBSCSIAddon:
     Type: AWS::EKS::Addon
-    DependsOn: EBSCSIDriverPodIdentity
     Properties:
       ClusterName: !Ref ControlPlane
       AddonName: aws-ebs-csi-driver
+      ServiceAccountRoleArn: !GetAtt EBSCSIDriverRole.Arn
       ResolveConflicts: OVERWRITE
 
   PodIdentityAddon:
@@ -371,6 +363,7 @@ Resources:
                           '--namespace', 'karpenter',
                           '--create-namespace',
                           '--set', f'settings.clusterName={cluster_name}',
+                          '--set', f'serviceAccount.annotations.eks\.amazonaws\.com/role-arn=arn:aws:iam::{account_id}:role/{cluster_name}-karpenter',
                           '--wait'
                       ], check=True)
                       
@@ -383,7 +376,6 @@ Resources:
     Type: AWS::CloudFormation::CustomResource
     DependsOn:
       - PodIdentityAddon
-      - KarpenterPodIdentity
     Properties:
       ServiceToken: !GetAtt KarpenterInstallLambda.Arn
       ClusterName: !Ref ControlPlane
