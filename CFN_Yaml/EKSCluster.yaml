@@ -260,13 +260,7 @@ Resources:
       ServiceAccount: aws-load-balancer-controller
       RoleArn: !GetAtt AWSLoadBalancerControllerRole.Arn
 
-  EBSCSIDriverPodIdentity:
-    Type: AWS::EKS::PodIdentityAssociation
-    Properties:
-      ClusterName: !Ref ControlPlane
-      Namespace: kube-system
-      ServiceAccount: ebs-csi-controller-sa
-      RoleArn: !GetAtt EBSCSIDriverRole.Arn
+
 
   KarpenterPodIdentity:
     Type: AWS::EKS::PodIdentityAssociation
@@ -298,13 +292,20 @@ Resources:
       AddonName: vpc-cni
       ResolveConflicts: OVERWRITE
 
+  EBSCSIDriverPodIdentity:
+    Type: AWS::EKS::PodIdentityAssociation
+    Properties:
+      ClusterName: !Ref ControlPlane
+      Namespace: kube-system
+      ServiceAccount: ebs-csi-controller-sa
+      RoleArn: !GetAtt EBSCSIDriverRole.Arn
+
   EBSCSIAddon:
     Type: AWS::EKS::Addon
     DependsOn: EBSCSIDriverPodIdentity
     Properties:
       ClusterName: !Ref ControlPlane
       AddonName: aws-ebs-csi-driver
-      ServiceAccountRoleArn: !GetAtt EBSCSIDriverRole.Arn
       ResolveConflicts: OVERWRITE
 
   PodIdentityAddon:
@@ -314,14 +315,80 @@ Resources:
       AddonName: eks-pod-identity-agent
       ResolveConflicts: OVERWRITE
 
-  KarpenterAddon:
-    Type: AWS::EKS::Addon
-    DependsOn: KarpenterPodIdentity
+  KarpenterInstallLambdaRole:
+    Type: AWS::IAM::Role
     Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EKSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - eks:DescribeCluster
+                Resource: !Sub "arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ControlPlane}"
+
+  KarpenterInstallLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ControlPlane}-karpenter-install"
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt KarpenterInstallLambdaRole.Arn
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import boto3
+          import subprocess
+          import json
+          import cfnresponse
+          
+          def handler(event, context):
+              try:
+                  cluster_name = event['ResourceProperties']['ClusterName']
+                  region = event['ResourceProperties']['Region']
+                  account_id = event['ResourceProperties']['AccountId']
+                  
+                  if event['RequestType'] == 'Create':
+                      # Update kubeconfig
+                      subprocess.run(['aws', 'eks', 'update-kubeconfig', '--name', cluster_name, '--region', region], check=True)
+                      
+                      # Install Karpenter via Helm
+                      subprocess.run(['helm', 'repo', 'add', 'karpenter', 'https://charts.karpenter.sh/'], check=True)
+                      subprocess.run(['helm', 'repo', 'update'], check=True)
+                      
+                      subprocess.run([
+                          'helm', 'upgrade', '--install', 'karpenter', 'karpenter/karpenter',
+                          '--namespace', 'karpenter',
+                          '--create-namespace',
+                          '--set', f'settings.clusterName={cluster_name}',
+                          '--wait'
+                      ], check=True)
+                      
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+  KarpenterInstall:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - PodIdentityAddon
+      - KarpenterPodIdentity
+    Properties:
+      ServiceToken: !GetAtt KarpenterInstallLambda.Arn
       ClusterName: !Ref ControlPlane
-      AddonName: karpenter
-      ServiceAccountRoleArn: !GetAtt KarpenterControllerRole.Arn
-      ResolveConflicts: OVERWRITE
+      Region: !Ref AWS::Region
+      AccountId: !Ref AWS::AccountId
 
 Outputs:
   ClusterName:
