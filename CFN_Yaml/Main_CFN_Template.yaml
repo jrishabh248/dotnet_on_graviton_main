@@ -145,14 +145,14 @@ Resources:
         - Outputs.EKSNodeInstanceRole
         EKSNodeAmiType: 'AL2_x86_64'
 
-  KarpenterInstallStack:
+  KarpenterAutoInstallStack:
     Type: 'AWS::CloudFormation::Stack'
     DependsOn: 
       - EKSClusterStack
       - EKSm6gxlNodeGroupStack
     Properties:
-      TemplateURL: !Join [ '', [ !Ref StackTemplateLocation, '/CFN_Yaml/KarpenterInstall.yaml']]
-      TimeoutInMinutes: '10'
+      TemplateURL: !Join [ '', [ !Ref StackTemplateLocation, '/CFN_Yaml/KarpenterAutoInstall.yaml']]
+      TimeoutInMinutes: '20'
       Parameters:
         EKSClusterName: !Ref EKSClusterName
         PrivateSubnets: !GetAtt
@@ -168,11 +168,11 @@ Outputs:
     Value: !GetAtt
     - JenkinsEnvStack
     - Outputs.AlbDns
-  KarpenterSetupInstructions:
-    Description: Instructions to complete Karpenter installation
+  KarpenterInstallationStatus:
+    Description: Karpenter automatic installation status
     Value: !GetAtt
-    - KarpenterInstallStack
-    - Outputs.KarpenterSetupMessage
+    - KarpenterAutoInstallStack
+    - Outputs.KarpenterStatus
 
 
 # References and comments:
