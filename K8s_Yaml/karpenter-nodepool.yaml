@@ -1,0 +1,60 @@
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: default
+spec:
+  template:
+    metadata:
+      labels:
+        karpenter.sh/provisioner-name: "default"
+    spec:
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64", "arm64"]
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["m5.large", "m5.xlarge", "m6g.large", "m6g.xlarge", "c5.large", "c5.xlarge", "c6g.large", "c6g.xlarge"]
+      nodeClassRef:
+        apiVersion: karpenter.k8s.aws/v1beta1
+        kind: EC2NodeClass
+        name: default
+      taints:
+        - key: karpenter.sh/provisioner-name
+          value: "default"
+          effect: NoSchedule
+  limits:
+    cpu: 1000
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30s
+    expireAfter: 2160h # 90 days
+---
+apiVersion: karpenter.k8s.aws/v1beta1
+kind: EC2NodeClass
+metadata:
+  name: default
+spec:
+  amiFamily: AL2
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "GadgetsOnline"
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "GadgetsOnline"
+  instanceStorePolicy: RAID0
+  userData: |
+    #!/bin/bash
+    /etc/eks/bootstrap.sh GadgetsOnline
+    echo 'net.ipv4.ip_local_port_range = 1024 65535' >> /etc/sysctl.conf
+    echo 'net.core.rmem_default = 262144' >> /etc/sysctl.conf
+    echo 'net.core.rmem_max = 16777216' >> /etc/sysctl.conf
+    echo 'net.core.wmem_default = 262144' >> /etc/sysctl.conf
+    echo 'net.core.wmem_max = 16777216' >> /etc/sysctl.conf
+    sysctl -p

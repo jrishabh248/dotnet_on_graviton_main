@@ -24,7 +24,7 @@ Parameters:
   EKSKubernetesVersion:
     Type: String
     Description: EKS Kubernetes Version
-    Default: '1.32'
+    Default: '1.27'
   EKSClusterName:
     Type: String
     Description: EKS Cluster name
@@ -38,7 +38,6 @@ Resources:
       TimeoutInMinutes: '5'
       Parameters:
         EnvironmentName: !Ref EnvironmentName
-        EKSClusterName: !Ref EKSClusterName
   
   IamStack:
     Type: 'AWS::CloudFormation::Stack'
@@ -146,12 +145,34 @@ Resources:
         - Outputs.EKSNodeInstanceRole
         EKSNodeAmiType: 'AL2_x86_64'
 
+  KarpenterInstallStack:
+    Type: 'AWS::CloudFormation::Stack'
+    DependsOn: 
+      - EKSClusterStack
+      - EKSm6gxlNodeGroupStack
+    Properties:
+      TemplateURL: !Join [ '', [ !Ref StackTemplateLocation, '/CFN_Yaml/KarpenterInstall.yaml']]
+      TimeoutInMinutes: '10'
+      Parameters:
+        EKSClusterName: !Ref EKSClusterName
+        PrivateSubnets: !GetAtt
+        - VPC
+        - Outputs.PrivateSubnets
+        ClusterSecurityGroupId: !GetAtt
+        - EKSClusterStack
+        - Outputs.ClusterSecurityGroupId
+
 Outputs:
   JenkinsURL:
     Description: ALB DNS Name to access Jenkins
     Value: !GetAtt
     - JenkinsEnvStack
     - Outputs.AlbDns
+  KarpenterSetupInstructions:
+    Description: Instructions to complete Karpenter installation
+    Value: !GetAtt
+    - KarpenterInstallStack
+    - Outputs.KarpenterSetupMessage
 
 
 # References and comments:

@@ -1,0 +1,182 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Install Karpenter on existing EKS cluster'
+
+Parameters:
+  EKSClusterName:
+    Type: String
+    Description: Name of the EKS cluster
+  PrivateSubnets:
+    Type: CommaDelimitedList
+    Description: Private subnet IDs for Karpenter nodes
+  ClusterSecurityGroupId:
+    Type: String
+    Description: EKS cluster security group ID
+
+Resources:
+  # Create Karpenter IAM role for service account
+  KarpenterControllerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'KarpenterController-${EKSClusterName}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref KarpenterControllerPolicy
+
+  KarpenterControllerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub 'KarpenterController-${EKSClusterName}'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ec2:DescribeImages
+              - ec2:RunInstances
+              - ec2:DescribeSubnets
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeLaunchTemplates
+              - ec2:DescribeInstances
+              - ec2:DescribeInstanceTypes
+              - ec2:DescribeInstanceTypeOfferings
+              - ec2:DescribeAvailabilityZones
+              - ec2:DeleteLaunchTemplate
+              - ec2:CreateTags
+              - ec2:CreateLaunchTemplate
+              - ec2:CreateFleet
+              - ec2:DescribeSpotPriceHistory
+              - pricing:GetProducts
+            Resource: '*'
+          - Effect: Allow
+            Action: ec2:TerminateInstances
+            Resource: '*'
+            Condition:
+              StringLike:
+                'ec2:ResourceTag/karpenter.sh/provisioner-name': '*'
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt KarpenterNodeRole.Arn
+
+  # Karpenter Node IAM Role
+  KarpenterNodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'KarpenterNode-${EKSClusterName}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  KarpenterNodeInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub 'KarpenterNode-${EKSClusterName}'
+      Roles:
+        - !Ref KarpenterNodeRole
+
+  # Lambda function to install Karpenter
+  KarpenterInstaller:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'KarpenterInstaller-${EKSClusterName}'
+      Runtime: python3.9
+      Handler: index.handler
+      Role: !GetAtt KarpenterInstallerRole.Arn
+      Timeout: 600
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import cfnresponse
+          import subprocess
+          import os
+          
+          def handler(event, context):
+              try:
+                  if event['RequestType'] == 'Create':
+                      cluster_name = event['ResourceProperties']['ClusterName']
+                      subnets = event['ResourceProperties']['Subnets']
+                      security_group = event['ResourceProperties']['SecurityGroup']
+                      
+                      ec2 = boto3.client('ec2')
+                      
+                      # Tag subnets for Karpenter discovery
+                      for subnet in subnets:
+                          ec2.create_tags(
+                              Resources=[subnet],
+                              Tags=[{'Key': 'karpenter.sh/discovery', 'Value': cluster_name}]
+                          )
+                      
+                      # Tag security group for Karpenter discovery
+                      ec2.create_tags(
+                          Resources=[security_group],
+                          Tags=[{'Key': 'karpenter.sh/discovery', 'Value': cluster_name}]
+                      )
+                      
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {
+                          'Message': 'Karpenter resources tagged successfully. Install Karpenter manually using: helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter --version 0.37.0 --namespace karpenter --create-namespace --set settings.clusterName=' + cluster_name
+                      })
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Message': 'No action required'})
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+
+  KarpenterInstallerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EC2TaggingPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                Resource: '*'
+
+  # Custom resource to trigger setup
+  KarpenterSetup:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt KarpenterInstaller.Arn
+      ClusterName: !Ref EKSClusterName
+      Subnets: !Ref PrivateSubnets
+      SecurityGroup: !Ref ClusterSecurityGroupId
+
+Outputs:
+  KarpenterControllerRoleArn:
+    Description: Karpenter Controller Role ARN
+    Value: !GetAtt KarpenterControllerRole.Arn
+  KarpenterNodeRoleArn:
+    Description: Karpenter Node Role ARN  
+    Value: !GetAtt KarpenterNodeRole.Arn
+  KarpenterSetupMessage:
+    Description: Karpenter setup instructions
+    Value: !GetAtt KarpenterSetup.Message

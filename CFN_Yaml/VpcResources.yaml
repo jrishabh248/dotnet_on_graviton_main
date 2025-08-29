@@ -48,10 +48,6 @@ Parameters:
   JenkinsPort:
     Type: Number
     Default: 8080
-  EKSClusterName:
-    Type: String
-    Description: EKS Cluster name for Karpenter discovery
-    Default: GadgetsOnline
 Resources:
   VPC:
     Type: 'AWS::EC2::VPC'
@@ -85,8 +81,6 @@ Resources:
       Tags:
         - Key: kubernetes.io/role/elb
           Value: '1'
-        - Key: karpenter.sh/discovery
-          Value: !Ref EKSClusterName
         - Key: Name
           Value: !Sub '${AWS::StackName}/PublicSubnet1'
         - Key: Environment
@@ -103,8 +97,6 @@ Resources:
       Tags:
         - Key: kubernetes.io/role/elb
           Value: '1'
-        - Key: karpenter.sh/discovery
-          Value: !Ref EKSClusterName
         - Key: Name
           Value: !Sub '${AWS::StackName}/PublicSubnet2'
         - Key: Environment
@@ -121,8 +113,6 @@ Resources:
       Tags:
         - Key: kubernetes.io/role/internal-elb
           Value: '1'
-        - Key: karpenter.sh/discovery
-          Value: !Ref EKSClusterName
         - Key: Name
           Value: !Sub '${AWS::StackName}/PrivateSubnet1'
         - Key: Environment
@@ -139,8 +129,6 @@ Resources:
       Tags:
         - Key: kubernetes.io/role/internal-elb
           Value: '1'
-        - Key: karpenter.sh/discovery
-          Value: !Ref EKSClusterName
         - Key: Name
           Value: !Sub '${AWS::StackName}/PrivateSubnet2'
         - Key: Environment
@@ -300,8 +288,6 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}/ClusterSharedNodeSecurityGroup'
-        - Key: karpenter.sh/discovery
-          Value: !Ref EKSClusterName
       VpcId: !Ref VPC
   ControlPlaneSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
