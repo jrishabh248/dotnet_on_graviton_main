@@ -1,12 +1,9 @@
-apiVersion: karpenter.sh/v1beta1
+apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
   name: default
 spec:
   template:
-    metadata:
-      labels:
-        karpenter.sh/provisioner-name: "default"
     spec:
       requirements:
         - key: kubernetes.io/arch
@@ -22,13 +19,9 @@ spec:
           operator: In
           values: ["m5.large", "m5.xlarge", "m6g.large", "m6g.xlarge", "c5.large", "c5.xlarge", "c6g.large", "c6g.xlarge"]
       nodeClassRef:
-        apiVersion: karpenter.k8s.aws/v1beta1
+        apiVersion: karpenter.k8s.aws/v1
         kind: EC2NodeClass
         name: default
-      taints:
-        - key: karpenter.sh/provisioner-name
-          value: "default"
-          effect: NoSchedule
   limits:
     cpu: 1000
   disruption:
@@ -36,7 +29,7 @@ spec:
     consolidateAfter: 30s
     expireAfter: 2160h # 90 days
 ---
-apiVersion: karpenter.k8s.aws/v1beta1
+apiVersion: karpenter.k8s.aws/v1
 kind: EC2NodeClass
 metadata:
   name: default

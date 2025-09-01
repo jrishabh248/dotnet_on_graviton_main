@@ -9,7 +9,7 @@ export CLUSTER_NAME=${EKS_CLUSTER_NAME:-"GadgetsOnline"}
 export AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-"ap-south-1"}
 export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
-echo "Installing Karpenter v0.37.0 on cluster: $CLUSTER_NAME"
+echo "Installing Karpenter v1.0.1 on cluster: $CLUSTER_NAME"
 
 # Update kubeconfig
 aws eks update-kubeconfig --name $CLUSTER_NAME
@@ -26,9 +26,9 @@ eksctl create iamserviceaccount \
   --attach-policy-arn "arn:aws:iam::${AWS_ACCOUNT_ID}:policy/KarpenterController-${CLUSTER_NAME}" \
   --approve
 
-# Install Karpenter using Helm
+# Install Karpenter using Helm (latest v1.0+)
 helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
-  --version "0.37.0" \
+  --version "1.0.1" \
   --namespace "karpenter" \
   --create-namespace \
   --set "settings.clusterName=${CLUSTER_NAME}" \

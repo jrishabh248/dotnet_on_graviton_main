@@ -145,13 +145,13 @@ Resources:
         - Outputs.EKSNodeInstanceRole
         EKSNodeAmiType: 'AL2_x86_64'
 
-  KarpenterAutoInstallStack:
+  KarpenterInstallStack:
     Type: 'AWS::CloudFormation::Stack'
     DependsOn: 
       - EKSClusterStack
       - EKSm6gxlNodeGroupStack
     Properties:
-      TemplateURL: !Join [ '', [ !Ref StackTemplateLocation, '/CFN_Yaml/KarpenterAutoInstall.yaml']]
+      TemplateURL: !Join [ '', [ !Ref StackTemplateLocation, '/CFN_Yaml/KarpenterInstall.yaml']]
       TimeoutInMinutes: '20'
       Parameters:
         EKSClusterName: !Ref EKSClusterName
@@ -171,8 +171,8 @@ Outputs:
   KarpenterInstallationStatus:
     Description: Karpenter automatic installation status
     Value: !GetAtt
-    - KarpenterAutoInstallStack
-    - Outputs.KarpenterStatus
+    - KarpenterInstallStack
+    - Outputs.KarpenterSetupMessage
 
 
 # References and comments:

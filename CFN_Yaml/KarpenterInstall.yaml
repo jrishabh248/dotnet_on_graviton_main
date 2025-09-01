@@ -105,7 +105,6 @@ Resources:
           import cfnresponse
           import subprocess
           import os
-          import urllib.request
           
           def handler(event, context):
               try:
@@ -115,6 +114,7 @@ Resources:
                       security_group = event['ResourceProperties']['SecurityGroup']
                       region = event['ResourceProperties']['Region']
                       
+                      os.environ['AWS_DEFAULT_REGION'] = region
                       ec2 = boto3.client('ec2')
                       
                       # Tag subnets for Karpenter discovery
@@ -133,35 +133,28 @@ Resources:
                       # Install kubectl
                       subprocess.run(['curl', '-LO', 'https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl'], check=True)
                       subprocess.run(['chmod', '+x', 'kubectl'], check=True)
-                      subprocess.run(['mv', 'kubectl', '/tmp/kubectl'], check=True)
                       
                       # Install helm
-                      subprocess.run(['curl', 'https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3', '|', 'bash'], shell=True, check=True)
+                      subprocess.run(['curl', '-fsSL', '-o', 'get_helm.sh', 'https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3'], check=True)
+                      subprocess.run(['chmod', '700', 'get_helm.sh'], check=True)
+                      subprocess.run(['./get_helm.sh'], check=True)
                       
                       # Update kubeconfig
-                      os.environ['AWS_DEFAULT_REGION'] = region
-                      subprocess.run(['aws', 'eks', 'update-kubeconfig', '--name', cluster_name], check=True)
+                      subprocess.run(['aws', 'eks', 'update-kubeconfig', '--name', cluster_name, '--region', region], check=True)
                       
-                      # Create OIDC provider
-                      try:
-                          subprocess.run(['eksctl', 'utils', 'associate-iam-oidc-provider', '--cluster', cluster_name, '--approve'], check=True)
-                      except:
-                          pass  # May already exist
-                      
-                      # Install Karpenter using Helm
+                      # Install Karpenter using Helm (latest v1.0+)
                       subprocess.run([
                           'helm', 'upgrade', '--install', 'karpenter', 
                           'oci://public.ecr.aws/karpenter/karpenter',
-                          '--version', '0.37.0',
+                          '--version', '1.0.1',
                           '--namespace', 'karpenter',
                           '--create-namespace',
                           '--set', f'settings.clusterName={cluster_name}',
                           '--wait'
                       ], check=True)
                       
-                      # Apply NodePool configuration
-                      nodepool_yaml = f'''
-apiVersion: karpenter.sh/v1beta1
+                      # Apply NodePool configuration (v1 API)
+                      nodepool_yaml = f'''apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
   name: default
@@ -175,14 +168,21 @@ spec:
         - key: karpenter.sh/capacity-type
           operator: In
           values: ["spot", "on-demand"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["m5.large", "m5.xlarge", "m6g.large", "m6g.xlarge", "c5.large", "c5.xlarge", "c6g.large", "c6g.xlarge"]
       nodeClassRef:
-        apiVersion: karpenter.k8s.aws/v1beta1
+        apiVersion: karpenter.k8s.aws/v1
         kind: EC2NodeClass
         name: default
   limits:
     cpu: 1000
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30s
+    expireAfter: 2160h
 ---
-apiVersion: karpenter.k8s.aws/v1beta1
+apiVersion: karpenter.k8s.aws/v1
 kind: EC2NodeClass
 metadata:
   name: default
@@ -194,15 +194,19 @@ spec:
   securityGroupSelectorTerms:
     - tags:
         karpenter.sh/discovery: "{cluster_name}"
+  instanceStorePolicy: RAID0
+  userData: |
+    #!/bin/bash
+    /etc/eks/bootstrap.sh {cluster_name}
 '''
                       
                       with open('/tmp/nodepool.yaml', 'w') as f:
                           f.write(nodepool_yaml)
                       
-                      subprocess.run(['/tmp/kubectl', 'apply', '-f', '/tmp/nodepool.yaml'], check=True)
+                      subprocess.run(['./kubectl', 'apply', '-f', '/tmp/nodepool.yaml'], check=True)
                       
                       cfnresponse.send(event, context, cfnresponse.SUCCESS, {
-                          'Message': 'Karpenter installed successfully with NodePool configuration'
+                          'Message': 'Karpenter v1.0.1 installed successfully with v1 API NodePool configuration'
                       })
                   else:
                       cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Message': 'No action required'})
@@ -228,18 +232,7 @@ spec:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action:
-                  - ec2:CreateTags
-                  - ec2:DescribeSubnets
-                  - ec2:DescribeSecurityGroups
-                  - eks:DescribeCluster
-                  - eks:ListClusters
-                  - iam:GetRole
-                  - iam:PassRole
-                  - iam:CreateRole
-                  - iam:AttachRolePolicy
-                  - iam:TagRole
-                  - sts:GetCallerIdentity
+                Action: '*'
                 Resource: '*'
 
   # Custom resource to trigger setup
@@ -260,5 +253,5 @@ Outputs:
     Description: Karpenter Node Role ARN  
     Value: !GetAtt KarpenterNodeRole.Arn
   KarpenterSetupMessage:
-    Description: Karpenter setup instructions
+    Description: Karpenter installation status
     Value: !GetAtt KarpenterSetup.Message
