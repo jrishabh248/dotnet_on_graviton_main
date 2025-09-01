@@ -97,14 +97,16 @@ Resources:
       Runtime: python3.9
       Handler: index.handler
       Role: !GetAtt KarpenterInstallerRole.Arn
-      Timeout: 900
+      Timeout: 600
       Code:
         ZipFile: |
           import boto3
           import json
           import cfnresponse
-          import subprocess
+          import urllib.request
           import os
+          import stat
+          import subprocess
           
           def handler(event, context):
               try:
@@ -130,21 +132,23 @@ Resources:
                           Tags=[{'Key': 'karpenter.sh/discovery', 'Value': cluster_name}]
                       )
                       
-                      # Install kubectl
-                      subprocess.run(['curl', '-LO', 'https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl'], check=True)
-                      subprocess.run(['chmod', '+x', 'kubectl'], check=True)
+                      # Download kubectl
+                      urllib.request.urlretrieve('https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl', '/tmp/kubectl')
+                      os.chmod('/tmp/kubectl', stat.S_IRWXU)
+                      
+                      # Download helm installer
+                      urllib.request.urlretrieve('https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3', '/tmp/get_helm.sh')
+                      os.chmod('/tmp/get_helm.sh', stat.S_IRWXU)
                       
                       # Install helm
-                      subprocess.run(['curl', '-fsSL', '-o', 'get_helm.sh', 'https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3'], check=True)
-                      subprocess.run(['chmod', '700', 'get_helm.sh'], check=True)
-                      subprocess.run(['./get_helm.sh'], check=True)
+                      subprocess.run(['/tmp/get_helm.sh'], check=True, cwd='/tmp')
                       
                       # Update kubeconfig
                       subprocess.run(['aws', 'eks', 'update-kubeconfig', '--name', cluster_name, '--region', region], check=True)
                       
                       # Install Karpenter using Helm
                       subprocess.run([
-                          'helm', 'upgrade', '--install', 'karpenter', 
+                          '/usr/local/bin/helm', 'upgrade', '--install', 'karpenter', 
                           'oci://public.ecr.aws/karpenter/karpenter',
                           '--version', '1.0.1',
                           '--namespace', 'karpenter',
