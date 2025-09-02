@@ -239,20 +239,13 @@ Resources:
             Principal:
               Service: codebuild.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/CodeBuildServiceRolePolicy
       Policies:
-        - PolicyName: EKSAccess
+        - PolicyName: CodeBuildPolicy
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action:
-                  - eks:*
-                  - ec2:*
-                  - iam:*
-                  - logs:*
-                  - sts:GetCallerIdentity
+                Action: '*'
                 Resource: '*'
 
   # Custom resource to trigger setup
