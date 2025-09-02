@@ -102,15 +102,8 @@ Resources:
                           Tags=[{'Key': 'karpenter.sh/discovery', 'Value': cluster_name}]
                       )
                       
-                      # Trigger CodeBuild to install Karpenter
-                      codebuild = boto3.client('codebuild', region_name=region)
-                      project_name = event['ResourceProperties']['ProjectName']
-                      
-                      response = codebuild.start_build(projectName=project_name)
-                      build_id = response['build']['id']
-                      
                       cfnresponse.send(event, context, cfnresponse.SUCCESS, {
-                          'Message': f'Karpenter installation started via CodeBuild. Build ID: {build_id}'
+                          'Message': f'Resources tagged for Karpenter. Run: helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter --version 1.0.1 --namespace karpenter --create-namespace --set settings.clusterName={cluster_name} --wait'
                       })
                   else:
                       cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Message': 'No action required'})
@@ -131,7 +124,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: KarpenterTriggerPolicy
+        - PolicyName: EC2TaggingPolicy
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -140,113 +133,9 @@ Resources:
                   - ec2:CreateTags
                   - ec2:DescribeSubnets
                   - ec2:DescribeSecurityGroups
-                  - codebuild:StartBuild
                 Resource: '*'
 
-  # CodeBuild project to install Karpenter
-  KarpenterInstallProject:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: !Sub 'KarpenterInstall-${EKSClusterName}'
-      ServiceRole: !GetAtt CodeBuildRole.Arn
-      Artifacts:
-        Type: NO_ARTIFACTS
-      Environment:
-        Type: LINUX_CONTAINER
-        ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
-        EnvironmentVariables:
-          - Name: CLUSTER_NAME
-            Value: !Ref EKSClusterName
-          - Name: AWS_DEFAULT_REGION
-            Value: !Ref AWS::Region
-          - Name: AWS_ACCOUNT_ID
-            Value: !Ref AWS::AccountId
-      Source:
-        Type: NO_SOURCE
-        BuildSpec: |
-          version: 0.2
-          phases:
-            install:
-              runtime-versions:
-                python: 3.9
-              commands:
-                - echo "Installing kubectl and helm..."
-                - curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
-                - chmod +x kubectl && mv kubectl /usr/local/bin/
-                - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-            pre_build:
-              commands:
-                - echo "Updating kubeconfig..."
-                - aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_DEFAULT_REGION
-                - echo "Testing kubectl access..."
-                - kubectl version --client || echo "kubectl client ready"
-                - sleep 30
-            build:
-              commands:
-                - echo "Installing Karpenter v1.0.1..."
-                - helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter --version 1.0.1 --namespace karpenter --create-namespace --set settings.clusterName=$CLUSTER_NAME --wait
-                - echo "Applying NodePool configuration..."
-                - |
-                  cat << EOF | kubectl apply -f -
-                  apiVersion: karpenter.sh/v1
-                  kind: NodePool
-                  metadata:
-                    name: default
-                  spec:
-                    template:
-                      spec:
-                        requirements:
-                          - key: kubernetes.io/arch
-                            operator: In
-                            values: ["amd64", "arm64"]
-                          - key: karpenter.sh/capacity-type
-                            operator: In
-                            values: ["spot", "on-demand"]
-                        nodeClassRef:
-                          apiVersion: karpenter.k8s.aws/v1
-                          kind: EC2NodeClass
-                          name: default
-                    limits:
-                      cpu: 1000
-                  ---
-                  apiVersion: karpenter.k8s.aws/v1
-                  kind: EC2NodeClass
-                  metadata:
-                    name: default
-                  spec:
-                    amiFamily: AL2
-                    subnetSelectorTerms:
-                      - tags:
-                          karpenter.sh/discovery: "$CLUSTER_NAME"
-                    securityGroupSelectorTerms:
-                      - tags:
-                          karpenter.sh/discovery: "$CLUSTER_NAME"
-                  EOF
-            post_build:
-              commands:
-                - echo "Verifying Karpenter installation..."
-                - kubectl get pods -n karpenter
-                - kubectl get nodepool
 
-  CodeBuildRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: codebuild.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: CodeBuildPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: '*'
-                Resource: '*'
 
   # Custom resource to trigger setup
   KarpenterSetup:
@@ -257,7 +146,7 @@ Resources:
       Subnets: !Ref PrivateSubnets
       SecurityGroup: !Ref ClusterSecurityGroupId
       Region: !Ref AWS::Region
-      ProjectName: !Ref KarpenterInstallProject
+
 
 Outputs:
   KarpenterControllerRoleArn:
@@ -266,9 +155,7 @@ Outputs:
   KarpenterNodeRoleArn:
     Description: Karpenter Node Role ARN  
     Value: !GetAtt KarpenterNodeRole.Arn
-  CodeBuildRoleArn:
-    Description: CodeBuild Role ARN for EKS access
-    Value: !GetAtt CodeBuildRole.Arn
+
   KarpenterSetupMessage:
     Description: Karpenter installation command
     Value: !GetAtt KarpenterSetup.Message
