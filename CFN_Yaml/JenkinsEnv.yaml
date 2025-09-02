@@ -285,16 +285,6 @@ Resources:
                 # Update kubeconfig
                 aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_DEFAULT_REGION
                 
-                # Wait for kubectl to work
-                for i in {1..10}; do
-                  if kubectl get nodes >/dev/null 2>&1; then
-                    echo "kubectl is working" >> /var/log/karpenter-install.log
-                    break
-                  fi
-                  echo "Waiting for kubectl access... attempt $i" >> /var/log/karpenter-install.log
-                  sleep 30
-                done
-                
                 # Add Jenkins role to aws-auth ConfigMap for cluster access
                 JENKINS_ROLE_ARN=$(aws sts get-caller-identity --query Arn --output text | sed 's/:assumed-role\/.*/:role\//' | sed 's/\/i-[0-9a-f]*$//')
                 eksctl create iamidentitymapping \
@@ -303,6 +293,16 @@ Resources:
                   --arn $JENKINS_ROLE_ARN \
                   --group system:masters \
                   --username jenkins-admin
+                
+                # Wait for kubectl to work after RBAC setup
+                for i in {1..10}; do
+                  if kubectl get nodes >/dev/null 2>&1; then
+                    echo "kubectl is working" >> /var/log/karpenter-install.log
+                    break
+                  fi
+                  echo "Waiting for kubectl access... attempt $i" >> /var/log/karpenter-install.log
+                  sleep 30
+                done
                 
                 # Create OIDC provider
                 eksctl utils associate-iam-oidc-provider --cluster $CLUSTER_NAME --approve --region $AWS_DEFAULT_REGION
