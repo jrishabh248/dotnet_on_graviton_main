@@ -259,46 +259,68 @@ Resources:
               systemctl restart jenkins
 
               # Install Karpenter after Jenkins setup
-              sleep 60
-              export CLUSTER_NAME="${EKSClusterName}"
-              export AWS_DEFAULT_REGION="${AWS::Region}"
-              export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-              
-              # Install eksctl
-              curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_$ARCH.tar.gz" | tar xz -C /tmp
-              mv /tmp/eksctl /usr/local/bin
-              
-              # Install Helm
-              curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-              
-              # Update kubeconfig
-              aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_DEFAULT_REGION
-              
-              # Create OIDC provider
-              eksctl utils associate-iam-oidc-provider --cluster $CLUSTER_NAME --approve --region $AWS_DEFAULT_REGION
-              
-              # Create Karpenter service account
-              eksctl create iamserviceaccount \
-                --name karpenter \
-                --namespace karpenter \
-                --cluster $CLUSTER_NAME \
-                --role-name $CLUSTER_NAME-karpenter \
-                --attach-policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/KarpenterControllerPolicy-$AWS_DEFAULT_REGION-$CLUSTER_NAME \
-                --approve \
-                --override-existing-serviceaccounts \
-                --region $AWS_DEFAULT_REGION
-              
-              # Install Karpenter
-              helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
-                --version v0.32.0 \
-                --namespace karpenter \
-                --create-namespace \
-                --set settings.aws.clusterName=$CLUSTER_NAME \
-                --set settings.aws.defaultInstanceProfile=KarpenterNodeInstanceProfile-$CLUSTER_NAME \
-                --set settings.aws.interruptionQueueName=$CLUSTER_NAME \
-                --wait
-              
-              echo "Karpenter installation completed" >> /var/log/jenkins-setup.log
+              (
+                sleep 120
+                export CLUSTER_NAME="${EKSClusterName}"
+                export AWS_DEFAULT_REGION="${AWS::Region}"
+                export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+                
+                # Install eksctl
+                curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_$ARCH.tar.gz" | tar xz -C /tmp
+                mv /tmp/eksctl /usr/local/bin
+                
+                # Install Helm
+                curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+                
+                # Wait for EKS cluster to be ready
+                for i in {1..30}; do
+                  if aws eks describe-cluster --name $CLUSTER_NAME --region $AWS_DEFAULT_REGION --query 'cluster.status' --output text | grep -q ACTIVE; then
+                    echo "EKS cluster is active" >> /var/log/karpenter-install.log
+                    break
+                  fi
+                  echo "Waiting for EKS cluster to be ready... attempt $i" >> /var/log/karpenter-install.log
+                  sleep 30
+                done
+                
+                # Update kubeconfig
+                aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_DEFAULT_REGION
+                
+                # Wait for kubectl to work
+                for i in {1..10}; do
+                  if kubectl get nodes >/dev/null 2>&1; then
+                    echo "kubectl is working" >> /var/log/karpenter-install.log
+                    break
+                  fi
+                  echo "Waiting for kubectl access... attempt $i" >> /var/log/karpenter-install.log
+                  sleep 30
+                done
+                
+                # Create OIDC provider
+                eksctl utils associate-iam-oidc-provider --cluster $CLUSTER_NAME --approve --region $AWS_DEFAULT_REGION
+                
+                # Create Karpenter service account
+                eksctl create iamserviceaccount \
+                  --name karpenter \
+                  --namespace karpenter \
+                  --cluster $CLUSTER_NAME \
+                  --role-name $CLUSTER_NAME-karpenter \
+                  --attach-policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/KarpenterControllerPolicy-$AWS_DEFAULT_REGION-$CLUSTER_NAME \
+                  --approve \
+                  --override-existing-serviceaccounts \
+                  --region $AWS_DEFAULT_REGION
+                
+                # Install Karpenter
+                helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
+                  --version v0.32.0 \
+                  --namespace karpenter \
+                  --create-namespace \
+                  --set settings.aws.clusterName=$CLUSTER_NAME \
+                  --set settings.aws.defaultInstanceProfile=KarpenterNodeInstanceProfile-$CLUSTER_NAME \
+                  --set settings.aws.interruptionQueueName=$CLUSTER_NAME \
+                  --wait
+                
+                echo "Karpenter installation completed" >> /var/log/karpenter-install.log
+              ) >> /var/log/karpenter-install.log 2>&1 &
 
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
