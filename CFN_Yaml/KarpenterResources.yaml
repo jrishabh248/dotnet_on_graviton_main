@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'Karpenter Resources for EKS Cluster'
+
+Parameters:
+  EKSClusterName:
+    Type: String
+    Description: EKS Cluster name
+    Default: GadgetsOnline
+  EKSNodeInstanceRole:
+    Type: String
+    Description: EKS Node Instance Role ARN
+
+Resources:
+  KarpenterNodeInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      InstanceProfileName: !Sub "KarpenterNodeInstanceProfile-${EKSClusterName}"
+      Path: "/"
+      Roles:
+        - !Ref KarpenterNodeRole
+
+  KarpenterNodeRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Sub "KarpenterNodeRole-${EKSClusterName}"
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  KarpenterInterruptionQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${EKSClusterName}"
+      MessageRetentionPeriod: 300
+
+Outputs:
+  KarpenterNodeInstanceProfile:
+    Description: Instance profile for Karpenter nodes
+    Value: !Ref KarpenterNodeInstanceProfile
+  KarpenterNodeRole:
+    Description: IAM role for Karpenter nodes
+    Value: !GetAtt KarpenterNodeRole.Arn
+  KarpenterInterruptionQueue:
+    Description: SQS queue for spot interruption handling
+    Value: !Ref KarpenterInterruptionQueue

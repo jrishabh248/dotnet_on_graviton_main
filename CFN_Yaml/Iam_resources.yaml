@@ -34,14 +34,23 @@ Resources:
                   - 'ssm:GetParameters'
                   - 'ssm:GetParametersByPath'
                 Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*'
-        - PolicyName: eks-readonly-access
+        - PolicyName: eks-full-access
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
                 Action:
-                  - 'eks:List*'
-                  - 'eks:Describe*'
+                  - 'eks:*'
+                  - 'iam:CreateRole'
+                  - 'iam:AttachRolePolicy'
+                  - 'iam:CreateServiceLinkedRole'
+                  - 'iam:CreateOpenIDConnectProvider'
+                  - 'iam:GetOpenIDConnectProvider'
+                  - 'iam:TagOpenIDConnectProvider'
+                  - 'iam:GetRole'
+                  - 'iam:ListAttachedRolePolicies'
+                  - 'iam:TagRole'
+                  - 'iam:PassRole'
                 Resource: '*'
         - PolicyName: ec2-access-for-jenkins
           PolicyDocument:
@@ -424,28 +433,6 @@ Resources:
       PolicyName: !Sub '${AWS::StackName}-${AWS::Region}-PolicyEBS'
       Roles:
         - !Ref EKSNodeInstanceRole
-
-  # CodeBuild role for Karpenter installation
-  KarpenterCodeBuildRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub '${AWS::StackName}-KarpenterCodeBuild'
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: codebuild.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: KarpenterCodeBuildPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: '*'
-                Resource: '*'
-
 Outputs:
   JenkinsInstanceProfile:
     Description: IAM Instance Profile for Jenkins Instances
@@ -465,6 +452,3 @@ Outputs:
   EKSNodeInstanceRole:
     Description: IAM Role for EKS Managed Nodes Group
     Value: !Sub '${EKSNodeInstanceRole.Arn}'
-  KarpenterCodeBuildRoleArn:
-    Description: CodeBuild Role ARN for Karpenter installation
-    Value: !GetAtt KarpenterCodeBuildRole.Arn

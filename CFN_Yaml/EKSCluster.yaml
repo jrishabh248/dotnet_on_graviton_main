@@ -1,9 +1,6 @@
 AWSTemplateFormatVersion: 2010-09-09
 Description: 'EKS cluster Stack'
 
-Conditions:
-  HasCodeBuildRole: !Not [!Equals [!Ref CodeBuildRoleArn, '']]
-
 Parameters:
   ControlPlaneSecurityGroup:
     Description: Security Group for the Control Plane
@@ -22,10 +19,6 @@ Parameters:
     Type: String
     Description: EKS Cluster name
     Default: GadgetsOnline
-  CodeBuildRoleArn:
-    Type: String
-    Description: CodeBuild Role ARN for EKS access
-    Default: ''
 
 Resources:
   ControlPlane:
@@ -47,19 +40,6 @@ Resources:
           Value: !Sub '${AWS::StackName}/ControlPlane'
       Version: !Ref EKSKubernetesVersion
 
-  # Add CodeBuild role access to EKS cluster
-  CodeBuildAccessEntry:
-    Type: AWS::EKS::AccessEntry
-    Condition: HasCodeBuildRole
-    Properties:
-      ClusterName: !Ref ControlPlane
-      PrincipalArn: !Ref CodeBuildRoleArn
-      Type: STANDARD
-      AccessPolicies:
-        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
-          AccessScope:
-            Type: cluster
-
   KarpenterControllerPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -70,14 +50,12 @@ Resources:
           - Effect: Allow
             Resource: "*"
             Action:
-              # Write Operations
               - ec2:CreateFleet
               - ec2:CreateLaunchTemplate
               - ec2:CreateTags
               - ec2:DeleteLaunchTemplate
               - ec2:RunInstances
               - ec2:TerminateInstances
-              # Read Operations
               - ec2:DescribeAvailabilityZones
               - ec2:DescribeImages
               - ec2:DescribeInstances
@@ -89,15 +67,10 @@ Resources:
               - ec2:DescribeSubnets
               - pricing:GetProducts
               - ssm:GetParameter
-          - Effect: Allow
-            Action:
-              # Write Operations
               - sqs:DeleteMessage
-              # Read Operations
               - sqs:GetQueueAttributes
               - sqs:GetQueueUrl
               - sqs:ReceiveMessage
-            Resource: "*"
           - Effect: Allow
             Action:
               - iam:PassRole
@@ -106,6 +79,38 @@ Resources:
             Action:
               - eks:DescribeCluster
             Resource: !Sub "arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ControlPlane}"
+
+  KarpenterNodeRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Sub "KarpenterNodeRole-${ControlPlane}"
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  KarpenterNodeInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      InstanceProfileName: !Sub "KarpenterNodeInstanceProfile-${ControlPlane}"
+      Path: "/"
+      Roles:
+        - !Ref KarpenterNodeRole
+
+  KarpenterInterruptionQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref ControlPlane
+      MessageRetentionPeriod: 300
 
 Outputs:
   ARN:
@@ -132,8 +137,3 @@ Outputs:
       - Endpoint
     Export:
       Name: !Sub '${AWS::StackName}::Endpoint'
-  OIDCIssuerURL:
-    Description: OIDC Issuer URL
-    Value: !Select [1, !Split ["//", !GetAtt ControlPlane.OpenIdConnectIssuerUrl]]
-    Export:
-      Name: !Sub '${AWS::StackName}::OIDCIssuerURL'

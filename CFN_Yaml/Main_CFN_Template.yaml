@@ -107,9 +107,6 @@ Resources:
         - Outputs.EKSServiceRoleArn
         EKSKubernetesVersion: !Ref EKSKubernetesVersion
         EKSClusterName: !Ref EKSClusterName
-        CodeBuildRoleArn: !GetAtt
-        - IamStack
-        - Outputs.KarpenterCodeBuildRoleArn
   
   EKSm6gxlNodeGroupStack:
     Type: 'AWS::CloudFormation::Stack'
@@ -148,22 +145,7 @@ Resources:
         - Outputs.EKSNodeInstanceRole
         EKSNodeAmiType: 'AL2_x86_64'
 
-  KarpenterHelmInstallStack:
-    Type: 'AWS::CloudFormation::Stack'
-    DependsOn: 
-      - EKSClusterStack
-      - EKSm6gxlNodeGroupStack
-    Properties:
-      TemplateURL: !Join [ '', [ !Ref StackTemplateLocation, '/CFN_Yaml/KarpenterHelmInstall.yaml']]
-      TimeoutInMinutes: '15'
-      Parameters:
-        EKSClusterName: !Ref EKSClusterName
-        PrivateSubnets: !GetAtt
-        - VPC
-        - Outputs.PrivateSubnets
-        ClusterSecurityGroupId: !GetAtt
-        - EKSClusterStack
-        - Outputs.ClusterSecurityGroupId
+
 
 Outputs:
   JenkinsURL:
@@ -171,11 +153,6 @@ Outputs:
     Value: !GetAtt
     - JenkinsEnvStack
     - Outputs.AlbDns
-  KarpenterInstallationStatus:
-    Description: Karpenter Helm installation status
-    Value: !GetAtt
-    - KarpenterHelmInstallStack
-    - Outputs.KarpenterSetupMessage
 
 
 # References and comments:

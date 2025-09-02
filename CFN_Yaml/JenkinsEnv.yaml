@@ -258,6 +258,48 @@ Resources:
               # java -jar jenkins-cli.jar restart
               systemctl restart jenkins
 
+              # Install Karpenter after Jenkins setup
+              sleep 60
+              export CLUSTER_NAME="${EKSClusterName}"
+              export AWS_DEFAULT_REGION="${AWS::Region}"
+              export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+              
+              # Install eksctl
+              curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_$ARCH.tar.gz" | tar xz -C /tmp
+              mv /tmp/eksctl /usr/local/bin
+              
+              # Install Helm
+              curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+              
+              # Update kubeconfig
+              aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_DEFAULT_REGION
+              
+              # Create OIDC provider
+              eksctl utils associate-iam-oidc-provider --cluster $CLUSTER_NAME --approve --region $AWS_DEFAULT_REGION
+              
+              # Create Karpenter service account
+              eksctl create iamserviceaccount \
+                --name karpenter \
+                --namespace karpenter \
+                --cluster $CLUSTER_NAME \
+                --role-name $CLUSTER_NAME-karpenter \
+                --attach-policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/KarpenterControllerPolicy-$AWS_DEFAULT_REGION-$CLUSTER_NAME \
+                --approve \
+                --override-existing-serviceaccounts \
+                --region $AWS_DEFAULT_REGION
+              
+              # Install Karpenter
+              helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
+                --version v0.32.0 \
+                --namespace karpenter \
+                --create-namespace \
+                --set settings.aws.clusterName=$CLUSTER_NAME \
+                --set settings.aws.defaultInstanceProfile=KarpenterNodeInstanceProfile-$CLUSTER_NAME \
+                --set settings.aws.interruptionQueueName=$CLUSTER_NAME \
+                --wait
+              
+              echo "Karpenter installation completed" >> /var/log/jenkins-setup.log
+
   AutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
