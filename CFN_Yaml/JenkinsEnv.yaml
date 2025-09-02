@@ -295,6 +295,15 @@ Resources:
                   sleep 30
                 done
                 
+                # Add Jenkins role to aws-auth ConfigMap for cluster access
+                JENKINS_ROLE_ARN=$(aws sts get-caller-identity --query Arn --output text | sed 's/:assumed-role\/.*/:role\//' | sed 's/\/i-[0-9a-f]*$//')
+                eksctl create iamidentitymapping \
+                  --cluster $CLUSTER_NAME \
+                  --region $AWS_DEFAULT_REGION \
+                  --arn $JENKINS_ROLE_ARN \
+                  --group system:masters \
+                  --username jenkins-admin
+                
                 # Create OIDC provider
                 eksctl utils associate-iam-oidc-provider --cluster $CLUSTER_NAME --approve --region $AWS_DEFAULT_REGION
                 
