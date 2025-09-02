@@ -55,16 +55,10 @@ Resources:
       ClusterName: !Ref ControlPlane
       PrincipalArn: !Ref CodeBuildRoleArn
       Type: STANDARD
-
-  CodeBuildAccessPolicy:
-    Type: AWS::EKS::AccessPolicyAssociation
-    Condition: HasCodeBuildRole
-    Properties:
-      ClusterName: !Ref ControlPlane
-      PrincipalArn: !Ref CodeBuildRoleArn
-      PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
-      AccessScope:
-        Type: cluster
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+          AccessScope:
+            Type: cluster
 
   KarpenterControllerPolicy:
     Type: AWS::IAM::ManagedPolicy
