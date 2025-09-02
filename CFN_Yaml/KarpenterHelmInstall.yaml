@@ -68,24 +68,104 @@ Resources:
 
 
 
-  # Helm installation using EKS add-on approach
-  KarpenterInstaller:
+  # CodeBuild project to install Karpenter
+  KarpenterInstallProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub 'KarpenterInstall-${EKSClusterName}'
+      ServiceRole: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${AWS::StackName}-KarpenterCodeBuild'
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        EnvironmentVariables:
+          - Name: CLUSTER_NAME
+            Value: !Ref EKSClusterName
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                python: 3.9
+              commands:
+                - echo "Installing kubectl and helm..."
+                - curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+                - chmod +x kubectl && mv kubectl /usr/local/bin/
+                - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+            pre_build:
+              commands:
+                - echo "Updating kubeconfig..."
+                - aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_DEFAULT_REGION
+                - echo "Testing kubectl access..."
+                - kubectl version --client
+            build:
+              commands:
+                - echo "Installing Karpenter v1.0.1..."
+                - helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter --version 1.0.1 --namespace karpenter --create-namespace --set settings.clusterName=$CLUSTER_NAME --wait
+                - echo "Applying NodePool configuration..."
+                - |
+                  cat << EOF | kubectl apply -f -
+                  apiVersion: karpenter.sh/v1
+                  kind: NodePool
+                  metadata:
+                    name: default
+                  spec:
+                    template:
+                      spec:
+                        requirements:
+                          - key: kubernetes.io/arch
+                            operator: In
+                            values: ["amd64", "arm64"]
+                          - key: karpenter.sh/capacity-type
+                            operator: In
+                            values: ["spot", "on-demand"]
+                        nodeClassRef:
+                          apiVersion: karpenter.k8s.aws/v1
+                          kind: EC2NodeClass
+                          name: default
+                    limits:
+                      cpu: 1000
+                  ---
+                  apiVersion: karpenter.k8s.aws/v1
+                  kind: EC2NodeClass
+                  metadata:
+                    name: default
+                  spec:
+                    amiFamily: AL2
+                    subnetSelectorTerms:
+                      - tags:
+                          karpenter.sh/discovery: "$CLUSTER_NAME"
+                    securityGroupSelectorTerms:
+                      - tags:
+                          karpenter.sh/discovery: "$CLUSTER_NAME"
+                  EOF
+            post_build:
+              commands:
+                - echo "Verifying Karpenter installation..."
+                - kubectl get pods -n karpenter
+                - kubectl get nodepool
+
+  # Lambda to trigger CodeBuild and tag resources
+  KarpenterTrigger:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub 'KarpenterHelmInstaller-${EKSClusterName}'
+      FunctionName: !Sub 'KarpenterTrigger-${EKSClusterName}'
       Runtime: python3.9
       Handler: index.handler
-      Role: !GetAtt KarpenterInstallerRole.Arn
-      Timeout: 600
+      Role: !GetAtt KarpenterTriggerRole.Arn
+      Timeout: 300
       Code:
         ZipFile: |
           import boto3
           import json
           import cfnresponse
-          import subprocess
-          import os
-          import urllib.request
-          import stat
+          import time
           
           def handler(event, context):
               try:
@@ -94,8 +174,10 @@ Resources:
                       subnets = event['ResourceProperties']['Subnets']
                       security_group = event['ResourceProperties']['SecurityGroup']
                       region = event['ResourceProperties']['Region']
+                      project_name = event['ResourceProperties']['ProjectName']
                       
                       ec2 = boto3.client('ec2', region_name=region)
+                      codebuild = boto3.client('codebuild', region_name=region)
                       
                       # Tag subnets for Karpenter discovery
                       for subnet in subnets:
@@ -110,35 +192,15 @@ Resources:
                           Tags=[{'Key': 'karpenter.sh/discovery', 'Value': cluster_name}]
                       )
                       
-                      # Download and install kubectl
-                      urllib.request.urlretrieve('https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl', '/tmp/kubectl')
-                      os.chmod('/tmp/kubectl', stat.S_IRWXU)
+                      # Wait for EKS cluster to be ready
+                      time.sleep(60)
                       
-                      # Download and install helm
-                      urllib.request.urlretrieve('https://get.helm.sh/helm-v3.13.0-linux-amd64.tar.gz', '/tmp/helm.tar.gz')
-                      subprocess.run(['tar', '-xzf', '/tmp/helm.tar.gz', '-C', '/tmp'], check=True)
-                      os.chmod('/tmp/linux-amd64/helm', stat.S_IRWXU)
-                      
-                      # Set environment
-                      os.environ['AWS_DEFAULT_REGION'] = region
-                      
-                      # Update kubeconfig with admin access
-                      subprocess.run(['aws', 'eks', 'update-kubeconfig', '--name', cluster_name, '--region', region], check=True)
-                      
-                      # Install Karpenter using Helm
-                      subprocess.run([
-                          '/tmp/linux-amd64/helm', 'upgrade', '--install', 'karpenter',
-                          'oci://public.ecr.aws/karpenter/karpenter',
-                          '--version', '1.0.1',
-                          '--namespace', 'karpenter',
-                          '--create-namespace',
-                          '--set', f'settings.clusterName={cluster_name}',
-                          '--set', 'serviceAccount.create=false',
-                          '--wait'
-                      ], check=True)
+                      # Trigger CodeBuild to install Karpenter
+                      response = codebuild.start_build(projectName=project_name)
+                      build_id = response['build']['id']
                       
                       cfnresponse.send(event, context, cfnresponse.SUCCESS, {
-                          'Message': 'Karpenter v1.0.1 installed successfully via Helm'
+                          'Message': f'Karpenter installation started via CodeBuild. Build ID: {build_id}'
                       })
                   else:
                       cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Message': 'No action required'})
@@ -146,7 +208,7 @@ Resources:
                   print('Error: ' + str(e))
                   cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
 
-  KarpenterInstallerRole:
+  KarpenterTriggerRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -159,23 +221,28 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: KarpenterHelmInstallPolicy
+        - PolicyName: TriggerPolicy
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: '*'
+                Action:
+                  - ec2:CreateTags
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - codebuild:StartBuild
                 Resource: '*'
 
   # Custom resource to trigger installation
   KarpenterSetup:
     Type: AWS::CloudFormation::CustomResource
     Properties:
-      ServiceToken: !GetAtt KarpenterInstaller.Arn
+      ServiceToken: !GetAtt KarpenterTrigger.Arn
       ClusterName: !Ref EKSClusterName
       Subnets: !Ref PrivateSubnets
       SecurityGroup: !Ref ClusterSecurityGroupId
       Region: !Ref AWS::Region
+      ProjectName: !Ref KarpenterInstallProject
 
 Outputs:
   KarpenterControllerRoleArn:
@@ -186,7 +253,7 @@ Outputs:
     Value: !GetAtt KarpenterNodeRole.Arn
   CodeBuildRoleArn:
     Description: CodeBuild Role ARN for EKS access
-    Value: !GetAtt KarpenterInstallerRole.Arn
+    Value: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${AWS::StackName}-KarpenterCodeBuild'
   KarpenterSetupMessage:
     Description: Karpenter installation status
     Value: !GetAtt KarpenterSetup.Message
