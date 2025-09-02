@@ -424,6 +424,28 @@ Resources:
       PolicyName: !Sub '${AWS::StackName}-${AWS::Region}-PolicyEBS'
       Roles:
         - !Ref EKSNodeInstanceRole
+
+  # CodeBuild role for Karpenter installation
+  KarpenterCodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-KarpenterCodeBuild'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: KarpenterCodeBuildPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: '*'
+                Resource: '*'
+
 Outputs:
   JenkinsInstanceProfile:
     Description: IAM Instance Profile for Jenkins Instances
@@ -443,3 +465,6 @@ Outputs:
   EKSNodeInstanceRole:
     Description: IAM Role for EKS Managed Nodes Group
     Value: !Sub '${EKSNodeInstanceRole.Arn}'
+  KarpenterCodeBuildRoleArn:
+    Description: CodeBuild Role ARN for Karpenter installation
+    Value: !GetAtt KarpenterCodeBuildRole.Arn

@@ -249,6 +249,9 @@ Outputs:
   KarpenterNodeRoleArn:
     Description: Karpenter Node Role ARN  
     Value: !GetAtt KarpenterNodeRole.Arn
+  CodeBuildRoleArn:
+    Description: CodeBuild Role ARN for EKS access
+    Value: !GetAtt KarpenterInstallerRole.Arn
   KarpenterSetupMessage:
     Description: Karpenter installation status
     Value: !GetAtt KarpenterSetup.Message

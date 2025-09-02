@@ -1,6 +1,9 @@
 AWSTemplateFormatVersion: 2010-09-09
 Description: 'EKS cluster Stack'
 
+Conditions:
+  HasCodeBuildRole: !Not [!Equals [!Ref CodeBuildRoleArn, '']]
+
 Parameters:
   ControlPlaneSecurityGroup:
     Description: Security Group for the Control Plane
@@ -19,6 +22,10 @@ Parameters:
     Type: String
     Description: EKS Cluster name
     Default: GadgetsOnline
+  CodeBuildRoleArn:
+    Type: String
+    Description: CodeBuild Role ARN for EKS access
+    Default: ''
 
 Resources:
   ControlPlane:
@@ -32,10 +39,32 @@ Resources:
         SecurityGroupIds: !Ref ControlPlaneSecurityGroup
         SubnetIds: !Ref SubnetsList
       RoleArn: !Ref EKSServiceRoleArn
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIG_MAP
+        BootstrapClusterCreatorAdminPermissions: true
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}/ControlPlane'
       Version: !Ref EKSKubernetesVersion
+
+  # Add CodeBuild role access to EKS cluster
+  CodeBuildAccessEntry:
+    Type: AWS::EKS::AccessEntry
+    Condition: HasCodeBuildRole
+    Properties:
+      ClusterName: !Ref ControlPlane
+      PrincipalArn: !Ref CodeBuildRoleArn
+      Type: STANDARD
+
+  CodeBuildAccessPolicy:
+    Type: AWS::EKS::AccessPolicyAssociation
+    Condition: HasCodeBuildRole
+    Properties:
+      ClusterName: !Ref ControlPlane
+      PrincipalArn: !Ref CodeBuildRoleArn
+      PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+      AccessScope:
+        Type: cluster
 
   KarpenterControllerPolicy:
     Type: AWS::IAM::ManagedPolicy

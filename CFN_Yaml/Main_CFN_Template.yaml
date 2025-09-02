@@ -107,6 +107,9 @@ Resources:
         - Outputs.EKSServiceRoleArn
         EKSKubernetesVersion: !Ref EKSKubernetesVersion
         EKSClusterName: !Ref EKSClusterName
+        CodeBuildRoleArn: !GetAtt
+        - IamStack
+        - Outputs.KarpenterCodeBuildRoleArn
   
   EKSm6gxlNodeGroupStack:
     Type: 'AWS::CloudFormation::Stack'
