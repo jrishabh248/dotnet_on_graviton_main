@@ -178,7 +178,10 @@ Resources:
             pre_build:
               commands:
                 - echo "Updating kubeconfig..."
-                - aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_DEFAULT_REGION --role-arn arn:aws:iam::$AWS_ACCOUNT_ID:role/KarpenterController-$CLUSTER_NAME
+                - aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_DEFAULT_REGION
+                - echo "Adding CodeBuild role to aws-auth ConfigMap..."
+                - |
+                  kubectl patch configmap/aws-auth -n kube-system --type merge -p='{"data":{"mapRoles":"- rolearn: arn:aws:iam::'$AWS_ACCOUNT_ID':role/'$(aws sts get-caller-identity --query Arn --output text | cut -d'/' -f2)'\n  username: codebuild\n  groups:\n    - system:masters\n"}}' || echo "ConfigMap patch failed, continuing..."
             build:
               commands:
                 - echo "Installing Karpenter v1.0.1..."
@@ -249,6 +252,7 @@ Resources:
                   - ec2:*
                   - iam:*
                   - logs:*
+                  - sts:GetCallerIdentity
                 Resource: '*'
 
   # Custom resource to trigger setup
