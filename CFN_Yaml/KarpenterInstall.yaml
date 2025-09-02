@@ -160,6 +160,8 @@ Resources:
             Value: !Ref EKSClusterName
           - Name: AWS_DEFAULT_REGION
             Value: !Ref AWS::Region
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
       Source:
         Type: NO_SOURCE
         BuildSpec: |
@@ -176,7 +178,7 @@ Resources:
             pre_build:
               commands:
                 - echo "Updating kubeconfig..."
-                - aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_DEFAULT_REGION
+                - aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_DEFAULT_REGION --role-arn arn:aws:iam::$AWS_ACCOUNT_ID:role/KarpenterController-$CLUSTER_NAME
             build:
               commands:
                 - echo "Installing Karpenter v1.0.1..."
@@ -234,13 +236,19 @@ Resources:
             Principal:
               Service: codebuild.amazonaws.com
             Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/CodeBuildServiceRolePolicy
       Policies:
-        - PolicyName: KarpenterInstallPolicy
+        - PolicyName: EKSAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: '*'
+                Action:
+                  - eks:*
+                  - ec2:*
+                  - iam:*
+                  - logs:*
                 Resource: '*'
 
   # Custom resource to trigger setup
