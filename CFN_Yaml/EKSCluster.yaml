@@ -31,12 +31,10 @@ Resources:
         SecurityGroupIds: !Ref ControlPlaneSecurityGroup
         SubnetIds: !Ref SubnetsList
       RoleArn: !Ref EKSServiceRoleArn
-      AccessConfig:
-        Enabled: true
+      AccessConfig: {}
       ComputeConfig:
         Enabled: true
-      KubernetesNetworkConfig:
-        Enabled: true
+      KubernetesNetworkConfig: {}
       StorageConfig:
         BlockStorage:
           Enabled: true
