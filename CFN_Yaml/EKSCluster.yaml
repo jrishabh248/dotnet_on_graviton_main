@@ -31,13 +31,15 @@ Resources:
         SecurityGroupIds: !Ref ControlPlaneSecurityGroup
         SubnetIds: !Ref SubnetsList
       RoleArn: !Ref EKSServiceRoleArn
-      ComputeConfig:
-        Enabled: true
-      KubernetesNetworkConfig:
-        Enabled: true
-      StorageConfig:
-        BlockStorage:
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIGMAP
+      Compute:
+        Type: AUTO
+        AutoModeConfig:
           Enabled: true
+        NodeMode: AUTO
+      BlockStorage:
+        Enabled: true
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}/ControlPlane'
