@@ -24,7 +24,6 @@ Resources:
   ControlPlane:
     Type: 'AWS::EKS::Cluster'
     Properties:
-      KubernetesNetworkConfig: {}
       Name: !Ref EKSClusterName
       ResourcesVpcConfig:
         EndpointPrivateAccess: false
@@ -34,6 +33,11 @@ Resources:
       RoleArn: !Ref EKSServiceRoleArn
       ComputeConfig:
         Enabled: true
+      KubernetesNetworkConfig:
+        Enabled: true
+      StorageConfig:
+        BlockStorage:
+          Enabled: true
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}/ControlPlane'
