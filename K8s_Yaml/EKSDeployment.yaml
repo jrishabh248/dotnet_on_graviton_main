@@ -18,7 +18,7 @@ metadata:
   labels:
     app: gadgets-online
 spec:
-  replicas: 1
+  replicas: 4
   selector:
     matchLabels:
       app: gadgets-online
@@ -28,14 +28,17 @@ spec:
         app: gadgets-online
     spec:
       affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: kubernetes.io/arch
-                operator: In
-                values:
-                - arm64
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - gadgets-online
+              topologyKey: kubernetes.io/arch
       containers:
       - name: gadgets-online
         image: nginx:latest

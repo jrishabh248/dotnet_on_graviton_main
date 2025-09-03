@@ -145,8 +145,6 @@ Resources:
         - Outputs.EKSNodeInstanceRole
         EKSNodeAmiType: 'AL2_x86_64'
 
-
-
 Outputs:
   JenkinsURL:
     Description: ALB DNS Name to access Jenkins

@@ -34,24 +34,14 @@ Resources:
                   - 'ssm:GetParameters'
                   - 'ssm:GetParametersByPath'
                 Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*'
-        - PolicyName: eks-full-access
+        - PolicyName: eks-readonly-access
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
                 Action:
-                  - 'eks:*'
-                  - 'iam:CreateRole'
-                  - 'iam:AttachRolePolicy'
-                  - 'iam:CreateServiceLinkedRole'
-                  - 'iam:CreateOpenIDConnectProvider'
-                  - 'iam:GetOpenIDConnectProvider'
-                  - 'iam:TagOpenIDConnectProvider'
-                  - 'iam:GetRole'
-                  - 'iam:ListAttachedRolePolicies'
-                  - 'iam:TagRole'
-                  - 'iam:PassRole'
-                  - 'cloudformation:*'
+                  - 'eks:List*'
+                  - 'eks:Describe*'
                 Resource: '*'
         - PolicyName: ec2-access-for-jenkins
           PolicyDocument:
