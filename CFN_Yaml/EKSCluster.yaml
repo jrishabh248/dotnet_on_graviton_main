@@ -21,6 +21,24 @@ Parameters:
     Default: GadgetsOnline
 
 Resources:
+  EksAutoNodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${EKSClusterName}-eks-auto-node-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - eks-auto.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
   ControlPlane:
     Type: 'AWS::EKS::Cluster'
     Properties:
@@ -31,8 +49,21 @@ Resources:
         SecurityGroupIds: !Ref ControlPlaneSecurityGroup
         SubnetIds: !Ref SubnetsList
       RoleArn: !Ref EKSServiceRoleArn
-      ComputeConfig:
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIG_MAP
+      Compute:
+        Type: AUTO
+        AutoModeConfig:
+          Enabled: true
+        NodeMode: AUTO
+        AutoModeNodeRoleArn: !GetAtt EksAutoNodeRole.Arn
+        NodePools:
+          - general-purpose
+          - system
+      BlockStorage:
         Enabled: true
+      UpgradePolicy:
+        KubernetesVersion: STANDARD
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}/ControlPlane'
