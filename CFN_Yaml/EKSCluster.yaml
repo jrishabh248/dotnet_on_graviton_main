@@ -31,14 +31,7 @@ Resources:
         SecurityGroupIds: !Ref ControlPlaneSecurityGroup
         SubnetIds: !Ref SubnetsList
       RoleArn: !Ref EKSServiceRoleArn
-      AccessConfig:
-        AuthenticationMode: API_AND_CONFIGMAP
-      Compute:
-        Type: AUTO
-        AutoModeConfig:
-          Enabled: true
-        NodeMode: AUTO
-      BlockStorage:
+      ComputeConfig:
         Enabled: true
       Tags:
         - Key: Name
