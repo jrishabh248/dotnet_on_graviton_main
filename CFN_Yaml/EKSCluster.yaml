@@ -33,8 +33,7 @@ Resources:
       RoleArn: !Ref EKSServiceRoleArn
       ComputeConfig:
         Enabled: true
-      KubernetesNetworkConfig:
-        Enabled: true
+      KubernetesNetworkConfig: {}
       StorageConfig:
         BlockStorage:
           Enabled: true
